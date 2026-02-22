@@ -15,7 +15,12 @@ from dotenv import load_dotenv
 from langchain_openai import ChatOpenAI
 from deepeval.models import DeepEvalBaseLLM
 from deepeval.test_case import LLMTestCase
-from deepeval.metrics import AnswerRelevancyMetric, FaithfulnessMetric
+from deepeval.metrics import (
+    AnswerRelevancyMetric,
+    FaithfulnessMetric,
+    ContextualRecallMetric,
+    BiasMetric,
+)
 
 DEBUG_LOG = Path(__file__).parent / ".cursor" / "debug-9215d5.log"
 def _dlog(msg: str, data: dict, hypothesis_id: str = ""):
@@ -36,6 +41,7 @@ _dlog("after load_dotenv", {"cwd": os.getcwd(), "env_path_exists": (Path(__file_
 DOCUMENT_PATH = Path(__file__).parent / "document.txt"
 DATASET_PATH = Path(__file__).parent / "dataset.csv"
 REPORTS_DIR = Path(__file__).parent / "reports"
+BOT_VERSION = "v1.0"
 
 
 class OpenRouterLLM(DeepEvalBaseLLM):
@@ -75,7 +81,6 @@ class OpenRouterLLM(DeepEvalBaseLLM):
             raise
         schema = kwargs.get("schema")
         if schema is not None:
-            # Извлекаем JSON из ответа (модель может обернуть в ```json ... ```)
             text = (out or "").strip()
             for marker in ("```json", "```"):
                 if marker in text:
@@ -87,9 +92,28 @@ class OpenRouterLLM(DeepEvalBaseLLM):
             text = text.strip()
             try:
                 data = json.loads(text)
+            except json.JSONDecodeError:
+                raise TypeError("Evaluation LLM outputted invalid JSON")
+            try:
                 return schema.model_validate(data) if hasattr(schema, "model_validate") else schema(**data)
-            except (json.JSONDecodeError, Exception):
-                pass
+            except Exception:
+                # Собираем объект схемы с безопасными значениями (модель могла вернуть другой формат)
+                if hasattr(schema, "model_fields"):
+                    kwargs_schema = {}
+                    for name in schema.model_fields:
+                        val = data.get(name)
+                        ann = str(schema.model_fields[name].annotation)
+                        if val is None:
+                            val = [] if "List" in ann or "list" in ann else ("" if "str" in ann else None)
+                        elif name == "claims" and isinstance(val, list):
+                            val = [str(x) for x in val]
+                        elif name == "statements" and isinstance(val, list):
+                            val = [str(x) for x in val]
+                        elif name == "truths" and isinstance(val, list):
+                            val = [str(x) for x in val]
+                        kwargs_schema[name] = val
+                    return schema(**kwargs_schema)
+                raise TypeError("Evaluation LLM outputted invalid JSON")
         return out
 
     async def a_generate(self, prompt: str, **kwargs):
@@ -112,9 +136,23 @@ class OpenRouterLLM(DeepEvalBaseLLM):
             text = text.strip()
             try:
                 data = json.loads(text)
+            except json.JSONDecodeError:
+                raise TypeError("Evaluation LLM outputted invalid JSON")
+            try:
                 return schema.model_validate(data) if hasattr(schema, "model_validate") else schema(**data)
-            except (json.JSONDecodeError, Exception):
-                pass
+            except Exception:
+                if hasattr(schema, "model_fields"):
+                    kwargs_schema = {}
+                    for name in schema.model_fields:
+                        val = data.get(name)
+                        ann = str(schema.model_fields[name].annotation)
+                        if val is None:
+                            val = [] if "List" in ann or "list" in ann else ("" if "str" in ann else None)
+                        elif name in ("claims", "statements", "truths") and isinstance(val, list):
+                            val = [str(x) for x in val]
+                        kwargs_schema[name] = val
+                    return schema(**kwargs_schema)
+                raise TypeError("Evaluation LLM outputted invalid JSON")
         return out
 
     def get_model_name(self) -> str:
@@ -149,7 +187,7 @@ def main():
     _dlog("main key check", {"key_len": len(api_key), "key_start": (api_key[:6] if api_key else "empty"), "has_placeholder": "ВСТАВЬ" in api_key, "key_check_passed": bool(api_key and "ВСТАВЬ" not in api_key)}, "B,D")
     # #endregion
     if not api_key or "ВСТАВЬ" in api_key:
-        print("⚠️  Заполни OPENROUTER_KEY в файле .env (ключ с openrouter.ai)")
+        print("⚠️  Set OPENROUTER_KEY in .env (get key from openrouter.ai)")
         return
 
     try:
@@ -161,7 +199,7 @@ def main():
         # #endregion
         raise
     if not test_data:
-        print("⚠️  Нет тест-кейсов в dataset.csv")
+        print("⚠️  No test cases in dataset.csv")
         return
 
     custom_llm = OpenRouterLLM()
@@ -180,14 +218,28 @@ def main():
         include_reason=True,
         model=custom_llm,
     )
+    contextual_recall_metric = ContextualRecallMetric(
+        threshold=0.6,
+        async_mode=False,
+        include_reason=True,
+        model=custom_llm,
+    )
+    bias_metric = BiasMetric(
+        threshold=0.3,
+        async_mode=False,
+        include_reason=True,
+        model=custom_llm,
+    )
 
     REPORTS_DIR.mkdir(exist_ok=True)
-    timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M")
-    report_path = REPORTS_DIR / f"results_{timestamp}.csv"
+    now = datetime.now()
+    run_date = now.strftime("%Y-%m-%d")
+    run_time = now.strftime("%H-%M")
+    report_path = REPORTS_DIR / f"results_{run_date}_{run_time}.csv"
     report_rows = []
 
-    print("🚀 Запускаю оценку... (~3–5 минут)\n")
-    print(f"{'№':<4} {'Вопрос':<38} {'Relev.':<7} {'Faith.':<7} {'Итог':<6} Причина")
+    print("🚀 Running evaluation... (~3-5 min)\n")
+    print(f"{'#':<4} {'Question':<38} {'Relev.':<7} {'Faith.':<7} {'Result':<6} Reason")
     print("─" * 95)
 
     passed = 0
@@ -200,15 +252,37 @@ def main():
         # #endregion
         relevancy_metric.measure(test_case)
         faithfulness_metric.measure(test_case)
+        contextual_recall_metric.measure(test_case)
+        bias_metric.measure(test_case)
 
-        r_score = getattr(relevancy_metric, "score", 0.0) or 0.0
-        f_score = getattr(faithfulness_metric, "score", 0.0) or 0.0
+        r_score = round((getattr(relevancy_metric, "score", 0.0) or 0.0), 2)
+        f_score = round((getattr(faithfulness_metric, "score", 0.0) or 0.0), 2)
+        cr_score = round((getattr(contextual_recall_metric, "score", 0.0) or 0.0), 2)
+        b_score = round((getattr(bias_metric, "score", 0.0) or 0.0), 2)
         r_reason = getattr(relevancy_metric, "reason", "") or ""
         f_reason = getattr(faithfulness_metric, "reason", "") or ""
 
         r_ok = r_score >= relevancy_metric.threshold
         f_ok = f_score >= faithfulness_metric.threshold
         overall_pass = r_ok and f_ok
+
+        if overall_pass:
+            failure_type = "passed"
+        elif not r_ok and not f_ok:
+            failure_type = "both_failed"
+        elif not r_ok:
+            failure_type = "relevancy_low"
+        else:
+            failure_type = "faithfulness_low"
+
+        if overall_pass:
+            severity = "ok"
+        elif f_score < 0.3:
+            severity = "critical"
+        elif r_score < 0.3:
+            severity = "major"
+        else:
+            severity = "minor"
         if overall_pass:
             passed += 1
         else:
@@ -225,7 +299,7 @@ def main():
                 parts.append("R: " + (r_reason.replace(chr(10), " ")[:42] + "…" if len(r_reason) > 42 else r_reason.replace(chr(10), " ")))
             if not f_ok and f_reason:
                 parts.append("F: " + (f_reason.replace(chr(10), " ")[:42] + "…" if len(f_reason) > 42 else f_reason.replace(chr(10), " ")))
-            reason_short = " | ".join(parts)[:70] + ("…" if len(" | ".join(parts)) > 70 else "") if parts else "(нет причины)"
+            reason_short = " | ".join(parts)[:70] + ("…" if len(" | ".join(parts)) > 70 else "") if parts else "(no reason)"
         print(f"{i:<4} {short_input:<38} {r_score:<7.2f} {f_score:<7.2f} {icon:<6} {reason_short}")
         if not overall_pass and (r_reason or f_reason):
             max_len = 300
@@ -236,34 +310,40 @@ def main():
                 fr = (f_reason[:max_len] + "…") if len(f_reason) > max_len else f_reason
                 print(f"       └ Faithfulness: {fr.replace(chr(10), ' ')}")
         elif not overall_pass and not (r_reason or f_reason) and i == 1:
-            print("       └ (причины пустые: модель не вернула reason в JSON — смотри CSV)")
+            print("       └ (reasons empty: model did not return reason in JSON — see CSV)")
 
         report_rows.append({
-            "date": timestamp,
+            "run_date": run_date,
+            "run_time": run_time,
+            "bot_version": BOT_VERSION,
             "test_id": i,
             "category": category,
             "input": test_case.input,
             "actual_output": test_case.actual_output,
             "relevancy_score": r_score,
             "faithfulness_score": f_score,
+            "contextual_recall_score": cr_score,
+            "bias_score": b_score,
+            "failure_type": failure_type,
+            "severity": severity,
+            "overall_pass_fail": "PASS" if overall_pass else "FAIL",
             "relevancy_reason": r_reason.replace("\n", " "),
             "faithfulness_reason": f_reason.replace("\n", " "),
-            "overall_pass_fail": "PASS" if overall_pass else "FAIL",
         })
 
     total = passed + failed
     pct = (100 * passed / total) if total else 0
     print("─" * 95)
-    print(f"\n📊 ИТОГО: {passed} прошли ✅  |  {failed} провалились ❌")
-    print(f"📈 Процент успеха: {pct:.0f}%")
-    print(f"💾 Результаты сохранены: {report_path}")
-    print("   (колонки relevancy_reason и faithfulness_reason — полные причины по каждому кейсу)")
+    print(f"\n📊 TOTAL: {passed} passed ✅  |  {failed} failed ❌")
+    print(f"📈 Success rate: {pct:.0f}%")
+    print(f"💾 Results saved: {report_path}")
+    print("   (relevancy_reason and faithfulness_reason columns contain full reasons per case)")
 
     fieldnames = [
-        "date", "test_id", "category", "input", "actual_output",
-        "relevancy_score", "faithfulness_score",
+        "run_date", "run_time", "bot_version", "test_id", "category", "input", "actual_output",
+        "relevancy_score", "faithfulness_score", "contextual_recall_score", "bias_score",
+        "failure_type", "severity", "overall_pass_fail",
         "relevancy_reason", "faithfulness_reason",
-        "overall_pass_fail",
     ]
     with open(report_path, "w", encoding="utf-8", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=fieldnames)
