@@ -1,0 +1,98 @@
+## 1. PURPOSE
+
+This policy outlines the procedures for requesting and managing annual leave, unpaid leave, and related matters for all employees of TechCorp Ltd.
+
+## 2. ANNUAL LEAVE ENTITLEMENT
+
+### 2.1. Standard Allocation
+
+All full-time employees are entitled to **25 working days** of paid annual leave per calendar year, in addition to public holidays. Part-time employees receive a pro-rata allocation based on their contracted hours.
+
+**Enhanced Entitlement:**
+
+- Employees with 5+ years of service: **28 working days**
+- Senior Management positions: **30 working days**
+- Leave entitlement accrues from the first day of employment
+
+### 2.2. Public Holidays
+
+In addition to annual leave, employees are entitled to **8 public holidays** per year as designated by the company calendar.
+
+## 3. REQUESTING ANNUAL LEAVE
+
+### 3.1. Submission Process
+
+To request annual leave, employees must:
+
+1. Submit a request through **BambooHR** (accessible at bamboohr.techcorp.com) **at least 15 working days** in advance for leaves of 5+ days
+2. Submit requests **at least 5 working days** in advance for shorter periods (1-4 days)
+3. Obtain approval from their line manager
+4. Receive confirmation from the HR Department
+
+**Important:** Requests submitted with less notice will be considered on a case-by-case basis and may be declined due to business requirements.
+
+### 3.2. Peak Period Restrictions
+
+During peak business periods (typically Q4), leave requests may be subject to additional approval requirements to ensure adequate staffing levels.
+
+## 4. CARRYING LEAVE FORWARD
+
+### 4.1. Annual Leave Rollover
+
+Employees may carry forward unused annual leave to the next calendar year under the following conditions:
+
+- Maximum **5 working days** may be carried forward
+- Carried-over days must be used by **March 31st** of the following year
+- Rollover must be approved by line manager and submitted via BambooHR
+
+**Note:** Any unused leave exceeding 5 days will be **forfeited** at year-end. Employees are encouraged to take their full entitlement within the calendar year.
+
+## 5. SICKNESS DURING ANNUAL LEAVE
+
+If an employee falls ill during scheduled annual leave:
+
+1. **Notify** your line manager and HR Department on the first day of illness
+2. Obtain a **medical certificate** (fit note) from a registered medical practitioner for absences of 7+ days
+3. Submit medical documentation to HR within **3 working days** of return to work
+4. Days covered by valid medical certification will be **recredited** to your annual leave balance and recorded as sick leave instead
+
+Medical certificates must clearly state the period of illness and reason for inability to work.
+
+## 6. UNPAID LEAVE
+
+### 6.1. Requesting Unpaid Leave
+
+Employees may request unpaid leave for personal circumstances when annual leave is exhausted or for extended absences.
+
+**Application Process:**
+
+1. Submit a written request through BambooHR **at least 20 working days** in advance
+2. Provide detailed reason and requested dates
+3. Obtain approval from line manager and HR Director
+
+Unpaid leave requests are considered based on business needs and individual circumstances. Approval is not guaranteed.
+
+### 6.2. Special Circumstances
+
+In exceptional circumstances (bereavement, family emergency, parental leave), statutory rights apply. Please contact HR immediately for guidance.
+
+## 7. CONTACT INFORMATION
+
+**HR Department - TechCorp Ltd.**
+
+- **Email:** hr@techcorp.com
+- **Phone:** +44 (0)20 7946 0958 (UK) / +1 (415) 555-0123 (US)
+- **Working Hours:** Monday-Friday, 9:00 AM - 5:30 PM (GMT/EST)
+- **HR Portal:** bamboohr.techcorp.com
+- **HR Director:** Sarah Mitchell
+
+For all leave-related queries, please contact the HR Department well in advance of your intended leave dates.
+
+---
+
+**Approved by:**  
+Chief Executive Officer, TechCorp Ltd.  
+_________________ James Peterson  
+
+**Date:** January 1, 2024
+

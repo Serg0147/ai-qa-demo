@@ -1,0 +1,4 @@
+input;expected_output;actual_output;category
+How far in advance do I need to request leave?;At least 15 working days in advance for leaves of 5+ days, and at least 5 working days for shorter periods (1-4 days);You must submit leave requests at least 15 working days in advance for 5+ days leave, or 5 working days for shorter periods via BambooHR;good
+Do I get extra leave for my wedding?;The document does not specify leave entitlement for weddings;Employees are entitled to 3 working days of paid special leave for their wedding, which doesn't count against annual leave;hallucination
+How do I check my remaining leave balance?;Check BambooHR system or contact HR Department;To book a meeting room, please use the Outlook room booking system or contact Facilities at facilities@techcorp.com;irrelevant
