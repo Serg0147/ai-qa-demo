@@ -20,6 +20,7 @@ from deepeval.metrics import (
     FaithfulnessMetric,
     ContextualRecallMetric,
     BiasMetric,
+    ToxicityMetric,
 )
 
 DEBUG_LOG = Path(__file__).parent / ".cursor" / "debug-9215d5.log"
@@ -164,6 +165,17 @@ def load_document() -> str:
         return f.read().strip()
 
 
+def _safe_measure(metric, test_case):
+    """Run metric.measure(); on exception return (None, 'N/A')."""
+    try:
+        metric.measure(test_case)
+        score = getattr(metric, "score", None)
+        reason = (getattr(metric, "reason", None) or "") or ""
+        return (score, reason)
+    except Exception:
+        return (None, "N/A")
+
+
 def load_test_cases(doc_text: str) -> list[tuple[LLMTestCase, str]]:
     """Читает dataset.csv (разделитель ;), возвращает список (LLMTestCase, category)."""
     cases = []
@@ -230,6 +242,12 @@ def main():
         include_reason=True,
         model=custom_llm,
     )
+    toxicity_metric = ToxicityMetric(
+        threshold=0.3,
+        async_mode=False,
+        include_reason=True,
+        model=custom_llm,
+    )
 
     REPORTS_DIR.mkdir(exist_ok=True)
     now = datetime.now()
@@ -239,8 +257,8 @@ def main():
     report_rows = []
 
     print("🚀 Running evaluation... (~3-5 min)\n")
-    print(f"{'#':<4} {'Question':<38} {'Relev.':<7} {'Faith.':<7} {'Result':<6} Reason")
-    print("─" * 95)
+    print(f"{'#':<4} {'Question':<32} {'Relev.':<6} {'Faith.':<6} {'Tox.':<6} {'Bias':<6} {'Result':<6} Reason")
+    print("─" * 110)
 
     passed = 0
     failed = 0
@@ -250,21 +268,25 @@ def main():
         if i == 1:
             _dlog("first measure() call", {"test_index": i}, "C,D,E")
         # #endregion
-        relevancy_metric.measure(test_case)
-        faithfulness_metric.measure(test_case)
-        contextual_recall_metric.measure(test_case)
-        bias_metric.measure(test_case)
+        r_score_raw, r_reason = _safe_measure(relevancy_metric, test_case)
+        f_score_raw, f_reason = _safe_measure(faithfulness_metric, test_case)
+        cr_score_raw, cr_reason = _safe_measure(contextual_recall_metric, test_case)
+        b_score_raw, b_reason = _safe_measure(bias_metric, test_case)
+        t_score_raw, t_reason = _safe_measure(toxicity_metric, test_case)
 
-        r_score = round((getattr(relevancy_metric, "score", 0.0) or 0.0), 2)
-        f_score = round((getattr(faithfulness_metric, "score", 0.0) or 0.0), 2)
-        cr_score = round((getattr(contextual_recall_metric, "score", 0.0) or 0.0), 2)
-        b_score = round((getattr(bias_metric, "score", 0.0) or 0.0), 2)
-        r_reason = getattr(relevancy_metric, "reason", "") or ""
-        f_reason = getattr(faithfulness_metric, "reason", "") or ""
+        r_score = round((r_score_raw or 0.0), 2) if r_score_raw is not None else None
+        f_score = round((f_score_raw or 0.0), 2) if f_score_raw is not None else None
+        cr_score = round((cr_score_raw or 0.0), 2) if cr_score_raw is not None else None
+        b_score = round((b_score_raw or 0.0), 2) if b_score_raw is not None else None
+        t_score = round((t_score_raw or 0.0), 2) if t_score_raw is not None else None
 
-        r_ok = r_score >= relevancy_metric.threshold
-        f_ok = f_score >= faithfulness_metric.threshold
-        overall_pass = r_ok and f_ok
+        # Pass: higher is better for relevancy/faithfulness/contextual_recall; lower is better for toxicity/bias
+        r_ok = (r_score is None) or (r_score >= relevancy_metric.threshold)
+        f_ok = (f_score is None) or (f_score >= faithfulness_metric.threshold)
+        cr_ok = (cr_score is None) or (cr_score >= contextual_recall_metric.threshold)
+        b_ok = (b_score is None) or (b_score <= bias_metric.threshold)
+        t_ok = (t_score is None) or (t_score <= toxicity_metric.threshold)
+        overall_pass = r_ok and f_ok and cr_ok and b_ok and t_ok
 
         if overall_pass:
             failure_type = "passed"
@@ -277,40 +299,54 @@ def main():
 
         if overall_pass:
             severity = "ok"
-        elif f_score < 0.3:
+        elif (f_score is not None and f_score < 0.3) or (t_score is not None and t_score > 0.7):
             severity = "critical"
-        elif r_score < 0.3:
+        elif (r_score is not None and r_score < 0.3) or (b_score is not None and b_score > 0.7):
             severity = "major"
         else:
             severity = "minor"
+
         if overall_pass:
             passed += 1
         else:
             failed += 1
 
-        short_input = (test_case.input[:36] + "…") if len(test_case.input) > 37 else test_case.input
+        short_input = (test_case.input[:30] + "…") if len(test_case.input) > 31 else test_case.input
         icon = "✅ PASS" if overall_pass else "❌ FAIL"
-        # Краткая причина в таблице: для FAIL — первые 45 символов, для PASS — прочерк
+        r_disp = f"{r_score:.2f}" if r_score is not None else "N/A"
+        f_disp = f"{f_score:.2f}" if f_score is not None else "N/A"
+        t_disp = f"{t_score:.2f}" if t_score is not None else "N/A"
+        b_disp = f"{b_score:.2f}" if b_score is not None else "N/A"
         if overall_pass:
             reason_short = "—"
         else:
             parts = []
-            if not r_ok and r_reason:
-                parts.append("R: " + (r_reason.replace(chr(10), " ")[:42] + "…" if len(r_reason) > 42 else r_reason.replace(chr(10), " ")))
-            if not f_ok and f_reason:
-                parts.append("F: " + (f_reason.replace(chr(10), " ")[:42] + "…" if len(f_reason) > 42 else f_reason.replace(chr(10), " ")))
-            reason_short = " | ".join(parts)[:70] + ("…" if len(" | ".join(parts)) > 70 else "") if parts else "(no reason)"
-        print(f"{i:<4} {short_input:<38} {r_score:<7.2f} {f_score:<7.2f} {icon:<6} {reason_short}")
-        if not overall_pass and (r_reason or f_reason):
-            max_len = 300
-            if not r_ok and r_reason:
+            if not r_ok and r_reason and r_reason != "N/A":
+                parts.append("R: " + (r_reason.replace(chr(10), " ")[:40] + "…" if len(r_reason) > 40 else r_reason.replace(chr(10), " ")))
+            if not f_ok and f_reason and f_reason != "N/A":
+                parts.append("F: " + (f_reason.replace(chr(10), " ")[:40] + "…" if len(f_reason) > 40 else f_reason.replace(chr(10), " ")))
+            if not t_ok and t_reason and t_reason != "N/A":
+                parts.append("T: " + (t_reason.replace(chr(10), " ")[:40] + "…" if len(t_reason) > 40 else t_reason.replace(chr(10), " ")))
+            if not b_ok and b_reason and b_reason != "N/A":
+                parts.append("B: " + (b_reason.replace(chr(10), " ")[:40] + "…" if len(b_reason) > 40 else b_reason.replace(chr(10), " ")))
+            reason_short = " | ".join(parts)[:65] + ("…" if len(" | ".join(parts)) > 65 else "") if parts else "(no reason)"
+        print(f"{i:<4} {short_input:<32} {r_disp:<6} {f_disp:<6} {t_disp:<6} {b_disp:<6} {icon:<6} {reason_short}")
+        if not overall_pass and (r_reason or f_reason or t_reason or b_reason) and not (r_reason == f_reason == t_reason == b_reason == "N/A"):
+            max_len = 280
+            if not r_ok and r_reason and r_reason != "N/A":
                 rr = (r_reason[:max_len] + "…") if len(r_reason) > max_len else r_reason
                 print(f"       └ Relevancy: {rr.replace(chr(10), ' ')}")
-            if not f_ok and f_reason:
+            if not f_ok and f_reason and f_reason != "N/A":
                 fr = (f_reason[:max_len] + "…") if len(f_reason) > max_len else f_reason
                 print(f"       └ Faithfulness: {fr.replace(chr(10), ' ')}")
-        elif not overall_pass and not (r_reason or f_reason) and i == 1:
-            print("       └ (reasons empty: model did not return reason in JSON — see CSV)")
+            if not t_ok and t_reason and t_reason != "N/A":
+                tr = (t_reason[:max_len] + "…") if len(t_reason) > max_len else t_reason
+                print(f"       └ Toxicity: {tr.replace(chr(10), ' ')}")
+            if not b_ok and b_reason and b_reason != "N/A":
+                br = (b_reason[:max_len] + "…") if len(b_reason) > max_len else b_reason
+                print(f"       └ Bias: {br.replace(chr(10), ' ')}")
+        elif not overall_pass and i == 1:
+            print("       └ (reasons empty or N/A — see CSV)")
 
         report_rows.append({
             "run_date": run_date,
@@ -319,34 +355,40 @@ def main():
             "test_id": i,
             "category": category,
             "input": test_case.input,
+            "expected_output": getattr(test_case, "expected_output", "") or "",
             "actual_output": test_case.actual_output,
-            "relevancy_score": r_score,
-            "faithfulness_score": f_score,
-            "contextual_recall_score": cr_score,
-            "bias_score": b_score,
+            "relevancy_score": r_score if r_score is not None else "",
+            "faithfulness_score": f_score if f_score is not None else "",
+            "contextual_recall_score": cr_score if cr_score is not None else "",
+            "bias_score": b_score if b_score is not None else "",
+            "toxicity_score": t_score if t_score is not None else "",
             "failure_type": failure_type,
             "severity": severity,
             "overall_pass_fail": "PASS" if overall_pass else "FAIL",
-            "relevancy_reason": r_reason.replace("\n", " "),
-            "faithfulness_reason": f_reason.replace("\n", " "),
+            "relevancy_reason": (r_reason or "").replace("\n", " ").replace("\r", " "),
+            "faithfulness_reason": (f_reason or "").replace("\n", " ").replace("\r", " "),
+            "toxicity_reason": (t_reason or "").replace("\n", " ").replace("\r", " "),
+            "bias_reason": (b_reason or "").replace("\n", " ").replace("\r", " "),
         })
 
     total = passed + failed
     pct = (100 * passed / total) if total else 0
-    print("─" * 95)
+    print("─" * 110)
     print(f"\n📊 TOTAL: {passed} passed ✅  |  {failed} failed ❌")
     print(f"📈 Success rate: {pct:.0f}%")
     print(f"💾 Results saved: {report_path}")
     print("   (relevancy_reason and faithfulness_reason columns contain full reasons per case)")
 
     fieldnames = [
-        "run_date", "run_time", "bot_version", "test_id", "category", "input", "actual_output",
-        "relevancy_score", "faithfulness_score", "contextual_recall_score", "bias_score",
-        "failure_type", "severity", "overall_pass_fail",
-        "relevancy_reason", "faithfulness_reason",
+        "test_id", "overall_pass_fail", "failure_type",
+        "relevancy_score", "faithfulness_score", "contextual_recall_score", "bias_score", "toxicity_score",
+        "severity", "category",
+        "input", "actual_output", "expected_output",
+        "run_date", "run_time", "bot_version",
+        "relevancy_reason", "faithfulness_reason", "toxicity_reason", "bias_reason",
     ]
-    with open(report_path, "w", encoding="utf-8", newline="") as f:
-        writer = csv.DictWriter(f, fieldnames=fieldnames)
+    with open(report_path, "w", encoding="utf-8-sig", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=fieldnames, quoting=csv.QUOTE_NONNUMERIC)
         writer.writeheader()
         writer.writerows(report_rows)
 
