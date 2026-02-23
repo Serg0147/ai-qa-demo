@@ -1,152 +1,152 @@
-# Гайд: тест-кейсы и флоу оценки
+# Guide: test cases and evaluation flow
 
-Как загружать тест-кейсы, в каком формате они должны быть и как с ними работать в AI QA Demo.
-
----
-
-## 1. Общий флоу
-
-```
-document.txt          →  База знаний (один документ)
-        ↓
-dataset.csv           →  Таблица тест-кейсов (вопрос + ответ бота + категория)
-        ↓
-main.py               →  Читает оба файла, для каждой строки CSV создаёт LLMTestCase
-        ↓
-DeepEval метрики      →  Answer Relevancy + Faithfulness оценивают каждый кейс
-        ↓
-reports/results_*.csv →  Итог: баллы, причины, PASS/FAIL
-```
-
-**Идея:** у тебя есть документ (политика, инструкция) и ответы бота на вопросы. Скрипт проверяет: (1) ответ по теме вопроса (Relevancy), (2) ответ не противоречит документу (Faithfulness). Тест-кейсы — это как раз пары «вопрос + ответ бота», которые ты подготавливаешь в CSV.
+How to load test cases, what format they should use, and how to work with them in AI QA Demo.
 
 ---
 
-## 2. Формат файла с тест-кейсами
+## 1. Overall flow
 
-**Файл:** `dataset.csv` в корне проекта (рядом с `main.py`).
+```
+document.txt          →  Knowledge base (single document)
+        ↓
+dataset.csv           →  Test case table (question + bot answer + category)
+        ↓
+main.py               →  Reads both files, creates LLMTestCase per CSV row
+        ↓
+DeepEval metrics      →  Answer Relevancy, Faithfulness, etc. score each case
+        ↓
+reports/results_*.csv →  Output: scores, reasons, PASS/FAIL
+```
 
-**Разделитель колонок:** точка с запятой `;` (не запятая), чтобы внутри текста могли быть запятые.
+**Idea:** you have a document (policy, instructions) and bot answers to questions. The script checks: (1) the answer is on-topic (Relevancy), (2) the answer does not contradict the document (Faithfulness). Test cases are the “question + bot answer” pairs you prepare in CSV.
 
-**Кодировка:** UTF-8.
+---
 
-**Первая строка — заголовки (обязательно):**
+## 2. Test case file format
+
+**File:** `dataset.csv` in the project root (next to `main.py`).
+
+**Column delimiter:** semicolon `;` (not comma), so text can contain commas.
+
+**Encoding:** UTF-8.
+
+**First row — headers (required):**
 
 ```text
 input;expected_output;actual_output;category
 ```
 
-| Колонка           | Обязательна | Что это |
-|-------------------|-------------|--------|
-| `input`           | Да          | Вопрос пользователя (что спросили бота). |
-| `expected_output` | Нет*        | Идеальный ответ (для твоей аналитики; метрики Relevancy/Faithfulness его не используют). |
-| `actual_output`   | Да          | Ответ бота, который мы оцениваем. |
-| `category`        | Нет*        | Твоя разметка: `good` / `hallucination` / `irrelevant`. Нужна только для отчёта и фильтрации. |
+| Column            | Required | Description |
+|-------------------|----------|-------------|
+| `input`           | Yes      | User question (what was asked). |
+| `expected_output` | No*      | Ideal answer (for your analysis; Relevancy/Faithfulness metrics do not use it). |
+| `actual_output`   | Yes      | Bot answer being evaluated. |
+| `category`        | No*      | Your label: `good` / `hallucination` / `irrelevant`. Used only in the report and for filtering. |
 
-\* В коде они не обязательны для расчёта метрик, но колонки должны быть в CSV. Можно оставлять пустыми или ставить `—`.
-
----
-
-## 3. Как скрипт загружает тест-кейсы
-
-В `main.py` происходит следующее:
-
-1. **Чтение документа**  
-   Весь текст из `document.txt` загружается в переменную `doc_text`.
-
-2. **Чтение CSV**  
-   Открывается `dataset.csv` с разделителем `;`. Каждая строка (кроме заголовка) — один тест-кейс.
-
-3. **Создание LLMTestCase для каждой строки**  
-   Для каждой строки CSV создаётся объект DeepEval с полями:
-   - `input` — из колонки `input`;
-   - `expected_output` — из колонки `expected_output`;
-   - `actual_output` — из колонки `actual_output`;
-   - `retrieval_context` — **всегда один и тот же**: `[doc_text]` (весь документ).
-
-4. **Оценка**  
-   Для каждого кейса вызываются метрики Answer Relevancy и Faithfulness. Они смотрят на `input`, `actual_output` и `retrieval_context` (документ).
-
-Итого: **тест-кейсы = строки в `dataset.csv`**. Добавил строку — добавился новый кейс. Удалил строку — кейс не попадёт в запуск.
+\* These columns are not required for metric calculation but must exist in the CSV. You can leave them empty or use a dash.
 
 ---
 
-## 4. Категории (good / hallucination / irrelevant)
+## 3. How the script loads test cases
 
-Их используешь ты для разметки и анализа отчёта. Скрипт просто сохраняет `category` в отчёт, метрики по ней не считаются.
+In `main.py` the flow is:
 
-- **good** — ответ бота правильный и по документу. Ожидаем PASS по обеим метрикам.
-- **hallucination** — ответ бота выдумывает факты, которых нет в документе (или противоречит ему). Ожидаем низкий Faithfulness, часто FAIL.
-- **irrelevant** — ответ не по теме вопроса (бот ответил не на то). Ожидаем низкий Answer Relevancy, часто FAIL.
+1. **Read document**  
+   All text from `document.txt` is loaded into `doc_text`.
 
-Так ты сразу видишь в отчёте: «этот кейс я пометил как good — прошёл ли он?» или «этот hallucination — метрики его правильно завалили?».
+2. **Read CSV**  
+   `dataset.csv` is opened with delimiter `;`. Each row (except the header) is one test case.
 
----
+3. **Create LLMTestCase per row**  
+   For each CSV row, a DeepEval object is created with:
+   - `input` — from column `input`;
+   - `expected_output` — from column `expected_output`;
+   - `actual_output` — from column `actual_output`;
+   - `retrieval_context` — **same for all**: `[doc_text]` (the full document).
 
-## 5. Как готовить тест-кейсы
+4. **Evaluation**  
+   For each case, metrics (Answer Relevancy, Faithfulness, etc.) are run. They use `input`, `actual_output`, and `retrieval_context` (the document).
 
-### Вариант A: Вручную в редакторе
-
-1. Открой `dataset.csv` в Excel, Google Таблицах или в Cursor (как текст).
-2. Убедись, что разделитель — `;` и первая строка — заголовки.
-3. Добавляй строки: вопрос в `input`, ответ бота в `actual_output`, при желании — `expected_output` и `category`.
-4. Сохрани в UTF-8 (в Excel: «Сохранить как» → CSV UTF-8 или экспорт с разделителем `;`).
-
-Если в тексте есть точка с запятой или переносы строк — лучше обернуть значение в кавычки (стандарт CSV).
-
-### Вариант B: Сгенерировать через ChatGPT / Gemini (как в твоём плане)
-
-1. Подготовь текст документа (или вставь из `document.txt`).
-2. Попроси модель сгенерировать 15 тест-кейсов в три группы: 5 good, 5 hallucination, 5 irrelevant.
-3. Уточни формат: «Верни только CSV, разделитель — точка с запятой, первая строка: input;expected_output;actual_output;category».
-4. Вставь результат в `dataset.csv` (заменив старый контент или добавив к существующему).
-
-### Вариант C: Экспорт из своей системы
-
-Если тест-кейсы хранятся в другой системе (таблица, база), сделай экспорт в CSV с колонками `input`, `expected_output`, `actual_output`, `category` и разделителем `;`, затем сохрани файл как `dataset.csv` в папке проекта.
+So: **test cases = rows in `dataset.csv`**. Add a row → new case. Remove a row → that case is not run.
 
 ---
 
-## 6. Пошаговый сценарий работы
+## 4. Categories (good / hallucination / irrelevant)
 
-1. **Положи документ в `document.txt`**  
-   Один файл — один «источник правды». Вся оценка Faithfulness идёт относительно этого текста.
+You use these for labeling and report analysis. The script only stores `category` in the report; metrics are not computed from it.
 
-2. **Заполни или обнови `dataset.csv`**  
-   Каждая строка = один тест-кейс (вопрос + ответ бота + при желании категория).
+- **good** — bot answer is correct and grounded in the document. Expect PASS on the metrics.
+- **hallucination** — bot answer invents facts not in the document (or contradicts it). Expect low Faithfulness, often FAIL.
+- **irrelevant** — answer is off-topic (bot answered the wrong thing). Expect low Answer Relevancy, often FAIL.
 
-3. **Запусти оценку**  
+That way you can see in the report: “this case I labeled good — did it pass?” or “this hallucination — did the metrics correctly fail it?”.
+
+---
+
+## 5. How to prepare test cases
+
+### Option A: Manually in an editor
+
+1. Open `dataset.csv` in Excel, Google Sheets, or Cursor (as text).
+2. Ensure the delimiter is `;` and the first row is the header.
+3. Add rows: question in `input`, bot answer in `actual_output`, and optionally `expected_output` and `category`.
+4. Save as UTF-8 (in Excel: “Save as” → CSV UTF-8 or export with `;` as delimiter).
+
+If text contains semicolons or newlines, wrap the value in double quotes (standard CSV).
+
+### Option B: Generate with ChatGPT / Gemini (as in your plan)
+
+1. Prepare the document text (or paste from `document.txt`).
+2. Ask the model to generate 15 test cases in three groups: 5 good, 5 hallucination, 5 irrelevant.
+3. Specify the format: “Return only CSV, delimiter semicolon, first row: input;expected_output;actual_output;category”.
+4. Paste the result into `dataset.csv` (replacing old content or appending).
+
+### Option C: Export from your system
+
+If test cases live in another system (spreadsheet, database), export to CSV with columns `input`, `expected_output`, `actual_output`, `category` and delimiter `;`, then save as `dataset.csv` in the project folder.
+
+---
+
+## 6. Step-by-step workflow
+
+1. **Put the document in `document.txt`**  
+   One file = one “source of truth”. All Faithfulness evaluation is relative to this text.
+
+2. **Fill or update `dataset.csv`**  
+   Each row = one test case (question + bot answer + optional category).
+
+3. **Run the evaluation**  
    ```bash
    source .venv/bin/activate
    python main.py
    ```
 
-4. **Посмотри вывод в консоли**  
-   Таблица: номер кейса, вопрос (обрезанный), Relevancy, Faithfulness, PASS/FAIL.
+4. **Check console output**  
+   Table: case number, question (truncated), Relevancy, Faithfulness, Tox., Bias, PASS/FAIL.
 
-5. **Открой отчёт**  
-   Файл `reports/results_YYYY-MM-DD_HH-MM.csv`. Там полные тексты, баллы, причины и `category`. По нему удобно анализировать, какие кейсы и почему провалились.
+5. **Open the report**  
+   File `reports/results_YYYY-MM-DD_HH-MM.csv`. It has full text, scores, reasons, and `category`. Use it to see which cases failed and why.
 
-6. **При необходимости поправь тест-кейсы**  
-   Подправил `dataset.csv` (или `document.txt`) — снова запусти `python main.py`. Новый отчёт создастся с новым временем в имени.
-
----
-
-## 7. Важные моменты
-
-- **Один документ на все кейсы.** Сейчас `retrieval_context` для всех строк один и тот же — весь `document.txt`. Если захочешь разные документы для разных кейсов — придётся менять код (например, добавить колонку `document_id` или путь к файлу и подставлять разный контекст).
-- **Имя и путь файла.** Скрипт читает тест-кейсы только из `dataset.csv` в папке проекта. Другой файл или имя — в коде нужно поменять `DATASET_PATH` в `main.py`.
-- **Пустые строки.** Пустые строки в CSV могут дать пустой `input` или `actual_output`; такие кейсы лучше удалять или не создавать — иначе метрики могут вести себя непредсказуемо.
-- **Кавычки в CSV.** Если внутри ячейки есть `;` или перевод строки, оберни значение в двойные кавычки `"..."`. Стандартное поведение `csv.DictReader` их обработает.
+6. **Adjust test cases if needed**  
+   Edit `dataset.csv` (or `document.txt`) and run `python main.py` again. A new report is created with a new timestamp in the filename.
 
 ---
 
-## 8. Краткий чеклист перед запуском
+## 7. Important notes
 
-- [ ] `document.txt` заполнен (база знаний).
-- [ ] `dataset.csv` в UTF-8, разделитель `;`, есть заголовок `input;expected_output;actual_output;category`.
-- [ ] В каждой строке заполнены минимум `input` и `actual_output`.
-- [ ] В `.env` указан рабочий `OPENROUTER_KEY`.
-- [ ] Запуск: `source .venv/bin/activate` → `python main.py`.
+- **One document for all cases.** Currently `retrieval_context` is the same for every row — the full `document.txt`. To use different documents per case, you’d need to change the code (e.g. add a `document_id` column or file path and pass different context).
+- **File name and path.** The script reads test cases only from `dataset.csv` in the project folder. For another file or name, change `DATASET_PATH` in `main.py`.
+- **Empty rows.** Empty rows in the CSV can yield empty `input` or `actual_output`; such cases are better removed or avoided — otherwise metrics may behave unpredictably.
+- **Quotes in CSV.** If a cell contains `;` or a newline, wrap the value in double quotes `"..."`. Standard `csv.DictReader` will handle them.
 
-После этого тест-кейсы загружаются автоматически из `dataset.csv`, и с ними можно работать, просто редактируя этот файл и перезапуская скрипт.
+---
+
+## 8. Pre-run checklist
+
+- [ ] `document.txt` is filled (knowledge base).
+- [ ] `dataset.csv` is UTF-8, delimiter `;`, header row is `input;expected_output;actual_output;category`.
+- [ ] Each row has at least `input` and `actual_output` filled.
+- [ ] `.env` has a valid `OPENROUTER_KEY` (no `REPLACE_ME` or `YOUR_KEY`).
+- [ ] Run: `source .venv/bin/activate` → `python main.py`.
+
+After that, test cases are loaded automatically from `dataset.csv`; you work with them by editing that file and re-running the script.
