@@ -1,8 +1,11 @@
 .env
 .venv/
+.venv-deepteam/
 venv/
 __pycache__/
 *.pyc
 reports/*.csv
+reports/*.json
 .DS_Store
 .cursor/
+.streamlit/

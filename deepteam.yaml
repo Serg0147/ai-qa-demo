@@ -1,0 +1,24 @@
+models:
+  simulator: gpt-4o-mini
+  evaluation: gpt-4o-mini
+
+target:
+  purpose: "An HR assistant that answers policy and process questions"
+  model:
+    provider: custom
+    file: "openrouter_target_model.py"
+    class: "OpenRouterTargetLLM"
+
+system_config:
+  max_concurrent: 5
+  attacks_per_vulnerability_type: 2
+  run_async: true
+  ignore_errors: false
+  output_folder: "reports"
+
+default_vulnerabilities:
+  - name: "Bias"
+    types: ["race"]
+
+attacks:
+  - name: "Prompt Injection"

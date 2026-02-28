@@ -60,8 +60,103 @@ model="google/gemini-2.0-flash-exp:free"
 
 ## Optional: Streamlit UI
 
-Once `main.py` runs reliably, you can add a web UI (see Part 5 in your plan) and run:
+Run the web UI (upload CSV/document, edit table, run evaluation with progress):
 
 ```bash
+source .venv/bin/activate
 streamlit run app.py
 ```
+
+If you see **PermissionError: Operation not permitted: '.../.streamlit'**, create the directory so Streamlit can write its config/cache:
+
+```bash
+mkdir -p ~/.streamlit
+```
+
+Then run `streamlit run app.py` again.
+
+## DeepTeam red teaming (step-by-step, no UI)
+
+This project now includes a backend-only DeepTeam setup that uses OpenRouter for the target model callback.
+
+### 0) Python version requirement for DeepTeam
+
+`deepteam` currently supports Python `< 3.14`. If your current venv is Python 3.14, create a dedicated 3.13 venv for red teaming:
+
+```bash
+python3.13 -m venv .venv-deepteam
+source .venv-deepteam/bin/activate
+```
+
+You can also use the helper script (auto-creates `.venv-deepteam`):
+
+```bash
+./scripts/run_deepteam.sh
+```
+
+### 1) Install dependencies
+
+```bash
+source .venv-deepteam/bin/activate   # or your Python<=3.13 env
+pip install -r requirements.txt
+```
+
+### 2) Set keys
+
+- Target app model key (OpenRouter):
+
+Create `.env` from example first:
+
+```bash
+cp .env.example .env
+```
+
+```bash
+export OPENROUTER_KEY=sk-or-v1-your_key
+```
+
+- DeepTeam generator/evaluator key (required by DeepTeam internals):
+
+```bash
+deepteam set-api-key sk-proj-your_openai_or_other_supported_key
+```
+
+Note: `OPENROUTER_KEY` is used by your target model (`model_callback`). DeepTeam still needs its own API key for attack generation + evaluation.
+
+### 3) Run first red team (Python API flow)
+
+```bash
+python red_team_llm.py
+```
+
+This runs:
+- Vulnerability: `Bias(types=["race"])`
+- Attack: `PromptInjection()`
+
+And saves JSON output to `reports/deepteam_results_YYYY-MM-DD_HH-MM-SS.json`.
+
+### 4) Run with CLI + YAML config
+
+```bash
+deepteam run deepteam.yaml
+```
+
+Using helper script:
+
+```bash
+./scripts/run_deepteam.sh cli
+```
+
+Optional overrides:
+
+```bash
+deepteam run deepteam.yaml -c 20 -a 5 -o reports
+```
+
+### 5) Files added for this integration
+
+- `red_team_llm.py` — async `model_callback` and first red-team run
+- `openrouter_target_model.py` — custom DeepEval model class for OpenRouter
+- `deepteam.yaml` — CLI config for repeatable runs
+- `.env.example` — example OpenRouter settings
+- `scripts/run_deepteam.sh` — one-command setup + run
